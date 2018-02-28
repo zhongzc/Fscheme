@@ -12,8 +12,8 @@ import Data.Ratio((%))
 -- import Datatypes (LispVal(..))
 
 data LispVal = Atom String
-            --  | List [LispVal]
-            --  | DottedList [LispVal] LispVal
+             | List [LispVal]
+             | DottedList [LispVal] LispVal
              | Number Integer
              | Float Double
              | Rational Rational
@@ -36,20 +36,17 @@ styleDef = emptyDef {
 lexer :: P.GenTokenParser String () Identity
 lexer = P.makeTokenParser styleDef
 
--- dot :: Parser String
--- dot = P.dot lexer
+dot :: Parser String
+dot = P.dot lexer
 
--- parens :: Parser a -> Parser a
--- parens = P.parens lexer
-
--- brackets :: Parser a -> Parser a
--- brackets = P.brackets lexer
+parens :: Parser a -> Parser a
+parens = P.parens lexer
 
 identifier :: Parser String
 identifier = P.identifier lexer
 
--- whiteSpace :: Parser ()
--- whiteSpace = P.whiteSpace lexer
+whiteSpace :: Parser ()
+whiteSpace = P.whiteSpace lexer
 
 lexeme :: Parser a -> Parser a
 lexeme = P.lexeme lexer
@@ -60,10 +57,15 @@ parseExpr = try (lexeme parseNumWithExponent)
         <|> try (lexeme parseRealNumber)
         <|> try (lexeme parseRationalNumber)
         <|> try (lexeme parseNumber)
-        <|> lexeme parseBool
+        <|> try (lexeme parseBool)
         <|> lexeme parseChar
-        <|> parseString
-        <|> parseAtom
+        <|> lexeme parseString
+        <|> lexeme parseAtom
+        <|> try (lexeme (parens parseList))
+        <|> lexeme (parens parseDottedList)
+        <|> lexeme parseQuoted
+        <|> lexeme parseQuasiQuoted
+        <|> lexeme parseUnQuote
 
 
 
@@ -71,8 +73,9 @@ parseExpr = try (lexeme parseNumWithExponent)
 symbol :: Parser Char
 symbol = oneOf "!$%&|*+-/:<=?>@^_~."
 
--- spaces1 :: Parser ()
--- spaces1 = skipMany1 space
+
+
+
 
 
 
@@ -139,14 +142,28 @@ parseAtom = do
 
 
 
+
+
 -- Parse Bool
+{- Bool literal
+#t  ==>  #t
+#f  ==>  #f
+'#f ==>  #f
+-}
+
 parseBool :: Parser LispVal
 parseBool = do
   _ <- char '#'
-  x <- oneOf "tf"
-  return $ case x of
-             't' -> Bool True
-             _   -> Bool False
+  (char 't' >> return (Bool True)) <|> (char 'f' >> return (Bool False))
+
+
+
+
+
+
+
+
+
 
 
 
@@ -178,6 +195,14 @@ parseBool = do
 
 
 -- Parse Character
+
+{- Character literal
+#\a	; lower case letter
+#\A	; upper case letter
+#\	; the space character
+#\space	; the preferred way to write a space
+#\newline	; the newline character 
+-}
 parseChar :: Parser LispVal
 parseChar = Character <$> (try parseCharWithName <|> parseHexChar <|> anyChar)
 
@@ -232,6 +257,11 @@ parseHexChar = do
 
 
 
+
+
+
+
+
 -- Parse String
 parseEscapedChar :: Parser Char
 parseEscapedChar = do
@@ -255,6 +285,8 @@ parseString = do
   x <- many $ noneOf "\\\"" <|> parseEscapedChar
   _ <- char '"'
   return $ String x
+
+
 
 
 
@@ -339,6 +371,54 @@ parseNumMod header elememt reader = do
 
 
 
+
+
+parseRealNumber :: Parser LispVal
+parseRealNumber = do
+  sign <- many (oneOf "+-")
+  num <- many digit
+  _ <- char '.'
+  frac <- many1 digit
+  let dec = if not (null num) then num ++ "." ++ frac else "0." ++ frac
+  return $ case length sign of
+    0 -> Float $ fst $ head (readFloat dec)
+    1 -> if sign == "-"
+         then Float $ negate $ fst $ head (readFloat dec)
+         else Float $ fst $ head (readFloat dec)
+    _ -> undefined
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 -- parse Number Exponent
 parseNumWithExponent :: Parser LispVal
 parseNumWithExponent = do
@@ -356,45 +436,6 @@ parseNumWithExponent = do
     buildResult _ _ = undefined
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-parseRealNumber :: Parser LispVal
-parseRealNumber = do
-  sign <- many (oneOf "+-")
-  num <- many digit
-  _ <- char '.'
-  frac <- many1 digit
-  let dec = if not (null num) then num ++ "." ++ frac else "0." ++ frac
-  return $ case length sign of
-    0 -> Float $ fst $ head (readFloat dec)
-    1 -> if sign == "-"
-         then Float $ negate $ fst $ head (readFloat dec)
-         else Float $ fst $ head (readFloat dec)
-    _ -> undefined
 
 
 
@@ -465,3 +506,91 @@ parseRationalNumber = do
 
 
 
+
+
+-- parse List
+parseList :: Parser LispVal
+parseList = fmap List (sepBy parseExpr whiteSpace)
+
+parseDottedList :: Parser LispVal
+parseDottedList = do
+  hd <- endBy parseExpr whiteSpace
+  tl <- dot >> parseExpr
+  return $ DottedList hd tl
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+parseQuoted :: Parser LispVal
+parseQuoted = do
+  _ <- lexeme (char '\'')
+  x <- parseExpr
+  return $ List [Atom "quote", x]
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+parseQuasiQuoted :: Parser LispVal
+parseQuasiQuoted = do
+  _ <- char '`'
+  x <- parseExpr
+  return $ List [Atom "quasiquote", x]
+
+
+parseUnQuote :: Parser LispVal
+parseUnQuote = do
+  _ <- char ','
+  x <- parseExpr
+  return $ List [Atom "unquote", x]
