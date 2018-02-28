@@ -74,9 +74,7 @@ parseExpr = try (lexeme parseNumWithExponent)
 
 -- Parse Atom
 parseAtom :: Parser LispVal
-parseAtom = do
-  atom <- identifier
-  return $ Atom atom
+parseAtom = Atom <$> identifier
 
 
 
@@ -94,7 +92,6 @@ parseBool = do
 
 
 -- Parse Character
-
 {- Character literal
 #\a	; lower case letter
 #\A	; upper case letter
@@ -123,9 +120,17 @@ parseChar = do
 
 
 -- Parse String
+parseString :: Parser LispVal
+parseString = do 
+  _ <- char '"'
+  x <- many $ noneOf "\\\"" <|> parseEscapedChar
+  _ <- char '"'
+  return $ String x
+
 parseEscapedChar :: Parser Char
 parseEscapedChar = do
-  x <- char '\\' >> anyChar
+  _ <- char '\\'
+  x <- anyChar
   case x of
     'n' -> return '\n'
     't' -> return '\t'
@@ -137,13 +142,6 @@ parseEscapedChar = do
       _ <- char ';'
       return $ DC.chr (fst $ head (readHex a))
     _   -> return x
-
-parseString :: Parser LispVal
-parseString = do 
-  _ <- char '"'
-  x <- many $ noneOf "\\\"" <|> parseEscapedChar
-  _ <- char '"'
-  return $ String x
 
 
 
@@ -165,16 +163,16 @@ parseDec = do
     _ -> undefined
 
 parseDec_ :: Parser LispVal
-parseDec_ = parseNumMod "#d" digit read
+parseDec_ = parseModNum "#d" digit read
 parseHex_ :: Parser LispVal
-parseHex_ = parseNumMod "#x" hexDigit (fst . head . readHex)
+parseHex_ = parseModNum "#x" hexDigit (fst . head . readHex)
 parseOct_ :: Parser LispVal
-parseOct_ = parseNumMod "#o" octDigit (fst . head . readOct)
+parseOct_ = parseModNum "#o" octDigit (fst . head . readOct)
 parseBin_ :: Parser LispVal
-parseBin_ = parseNumMod "#b" (oneOf "10") (fst . head . readInt 2 (`elem` "01") DC.digitToInt)
+parseBin_ = parseModNum "#b" (oneOf "10") (fst . head . readInt 2 (`elem` "01") DC.digitToInt)
 
-parseNumMod :: String -> Parser Char -> (String -> Integer) -> Parser LispVal
-parseNumMod header elememt reader = do
+parseModNum :: String -> Parser Char -> (String -> Integer) -> Parser LispVal
+parseModNum header elememt reader = do
   sign <- string header >> many (char '-')
   num <- many1 elememt
   case length sign of
@@ -184,7 +182,7 @@ parseNumMod header elememt reader = do
 
 
 
-
+-- parse Real Number
 parseRealNumber :: Parser LispVal
 parseRealNumber = do
   sign <- many (oneOf "+-")
@@ -194,32 +192,15 @@ parseRealNumber = do
             then num ++ "." ++ frac 
             else "0." ++ frac
   return $ case length sign of
-    0 -> Float $ fst $ head (readFloat dec)
-    1 -> if sign == "-"
-         then Float $ negate $ fst $ head (readFloat dec)
-         else Float $ fst $ head (readFloat dec)
-    _ -> undefined
+             0 -> Float $ fst $ head (readFloat dec)
+             1 -> if sign == "-"
+                 then Float $ negate $ fst $ head (readFloat dec)
+                 else Float $ fst $ head (readFloat dec)
+             _ -> undefined
 
 
 
--- parse Number Exponent
-parseNumWithExponent :: Parser LispVal
-parseNumWithExponent = do
-  n <- try parseRealNumber <|> parseDec
-  expnt <- many1 $ oneOf "Ee"
-  case length expnt of
-    0 -> return n
-    1 -> do
-      exp_ <- parseDec
-      return $ buildResult n exp_
-    _ -> undefined
-  where
-    buildResult (Number n_) (Number exp_) =  Float $ fromIntegral n_ * (10 ** fromIntegral exp_)
-    buildResult (Float n_) (Number exp_) = Float $ n_ * (10 ** fromIntegral exp_)
-    buildResult _ _ = undefined
-
-
-
+-- parse Rational Number
 parseRationalNumber :: Parser LispVal
 parseRationalNumber = do
   (Number numer) <- parseDec
@@ -228,11 +209,30 @@ parseRationalNumber = do
 
 
 
+-- parse Number Exponent, like 1.0e10, 10e3
+parseNumWithExponent :: Parser LispVal
+parseNumWithExponent = do
+  n <- try parseRealNumber <|> parseDec
+  expnt <- many1 $ oneOf "Ee"
+  case length expnt of
+    0 -> return n
+    1 -> do
+      (Number ep) <- parseDec
+      case n of
+        (Number n_) -> return $ Float $ fromIntegral n_ * (10 ** fromIntegral ep)
+        (Float n_)  -> return $ Float $ n_ * (10 ** fromIntegral ep)
+        _ -> undefined
+    _ -> undefined
+
+
 
 -- parse List
 parseList :: Parser LispVal
 parseList = fmap List (sepBy parseExpr whiteSpace)
 
+
+
+-- parse dotted list
 parseDottedList :: Parser LispVal
 parseDottedList = do
   hd <- endBy parseExpr whiteSpace
@@ -241,6 +241,7 @@ parseDottedList = do
 
 
 
+-- parse quote expresion
 parseQuoted :: Parser LispVal
 parseQuoted = do
   x <- char '\'' >> parseExpr
@@ -248,6 +249,7 @@ parseQuoted = do
 
 
 
+-- parse quasiquoted
 parseQuasiQuoted :: Parser LispVal
 parseQuasiQuoted = do
   x <- char '`' >> parseExpr
@@ -255,6 +257,7 @@ parseQuasiQuoted = do
 
 
 
+-- parse unquote
 parseUnQuote :: Parser LispVal
 parseUnQuote = do
   x <- char ',' >> parseExpr
