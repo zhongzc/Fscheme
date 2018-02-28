@@ -1,17 +1,22 @@
-module Fscheme.Parser
-  (
-    parseExpr
-  ) where
+-- module Text.Eval where
+
 import Text.ParserCombinators.Parsec
 import Text.Parsec.Language
 import qualified Text.Parsec.Token as P
 import qualified Data.Char as DC
-import Numeric (readInt, readDec, readOct, readHex, readFloat)
+import Numeric (readInt, readOct, readHex, readFloat)
 import Data.Functor.Identity (Identity)
-import Data.Ratio((%))
-import Fscheme.Types (LispVal(..))
-
-
+import Data.Ratio((%), numerator, denominator)
+import System.Environment
+data LispVal = Atom String
+             | List [LispVal]
+             | DottedList [LispVal] LispVal
+             | Number Integer
+             | Float Double
+             | Rational Rational
+             | String String
+             | Bool Bool
+             | Character Char
 
 styleDef :: LanguageDef ()
 styleDef = emptyDef {
@@ -26,7 +31,7 @@ styleDef = emptyDef {
 }
 
 symbol :: Parser Char
-symbol = oneOf "!$%&|*+-/:<=?>@^_~."
+symbol = oneOf "!$%&|*+-/:<=?>@^_~"
 
 lexer :: P.GenTokenParser String () Identity
 lexer = P.makeTokenParser styleDef
@@ -53,9 +58,9 @@ parseExpr = try (lexeme parseNumWithExponent)
         <|> try (lexeme parseRationalNumber)
         <|> try (lexeme parseNumber)
         <|> try (lexeme parseBool)
+        <|> lexeme parseAtom
         <|> lexeme parseChar
         <|> lexeme parseString
-        <|> lexeme parseAtom
         <|> try (lexeme (parens parseList))
         <|> lexeme (parens parseDottedList)
         <|> lexeme parseQuoted
@@ -103,9 +108,7 @@ parseExpr = try (lexeme parseNumWithExponent)
 parseAtom :: Parser LispVal
 parseAtom = do
   atom <- identifier
-  if atom == "."
-  then undefined
-  else return $ Atom atom
+  return $ Atom atom
 
 
 
@@ -197,27 +200,22 @@ parseBool = do
 #\newline	; the newline character 
 -}
 parseChar :: Parser LispVal
-parseChar = Character <$> (string "#\\" >> (try parseCharWithName <|> parseHexChar <|> anyChar))
-
-parseCharWithName :: Parser Char
-parseCharWithName = do
-  name <- many1 letter
-  return $ case name of
-    "space"     -> ' '
-    "newline"   -> '\n'
-    "alarm"     -> '\a' 
-    "backspace" -> '\b' 
-    "delete"    -> '\DEL'
-    "escape"    -> '\ESC' 
-    "nul"       -> '\0' 
-    "return"    -> '\n' 
-    "tab"       -> '\t'
-    _           -> undefined
-
-parseHexChar :: Parser Char
-parseHexChar = do
-  x <- many1 hexDigit
-  return $ DC.chr (fst $ head (readHex x))
+parseChar = do
+  name <- string "#\\" >> many1 (digit <|> letter)
+  return $ Character $
+    case length name of
+      1 -> head name
+      _ -> case name of
+        "space"     -> ' '
+        "newline"   -> '\n'
+        "alarm"     -> '\a' 
+        "backspace" -> '\b' 
+        "delete"    -> '\DEL'
+        "escape"    -> '\ESC' 
+        "nul"       -> '\0' 
+        "return"    -> '\n' 
+        "tab"       -> '\t'
+        _           -> DC.chr (fst $ head (readHex name))
 
 
 
@@ -309,28 +307,37 @@ parseString = do
 
 -- Parse Number
 parseNumber :: Parser LispVal
-parseNumber = parseDec
-          <|> parseHex
-          <|> parseOct
-          <|> parseBin
+parseNumber = try parseDec
+          <|> try parseDec_
+          <|> try parseHex_
+          <|> try parseOct_
+          <|> parseBin_
 
 parseDec :: Parser LispVal
-parseDec = parseNumMod "#d" digit readDec
-parseHex :: Parser LispVal
-parseHex = parseNumMod "#x" hexDigit readHex
-parseOct :: Parser LispVal
-parseOct = parseNumMod "#o" octDigit readOct
-parseBin :: Parser LispVal
-parseBin = parseNumMod "#b" (oneOf "10") (readInt 2 (`elem` "01") DC.digitToInt)
-
-parseNumMod :: String -> Parser Char -> ReadS Integer -> Parser LispVal
-parseNumMod header elememt reader = do
-  _ <- try (string header)
+parseDec = do
   sign <- many (char '-')
+  num <- many1 digit
+  case length sign of
+    0 -> return $ Number (read num)
+    1 -> return $ Number (negate (read num))
+    _ -> undefined
+
+parseDec_ :: Parser LispVal
+parseDec_ = parseNumMod "#d" digit read
+parseHex_ :: Parser LispVal
+parseHex_ = parseNumMod "#x" hexDigit (fst . head . readHex)
+parseOct_ :: Parser LispVal
+parseOct_ = parseNumMod "#o" octDigit (fst . head . readOct)
+parseBin_ :: Parser LispVal
+parseBin_ = parseNumMod "#b" (oneOf "10") (fst . head . readInt 2 (`elem` "01") DC.digitToInt)
+
+parseNumMod :: String -> Parser Char -> (String -> Integer) -> Parser LispVal
+parseNumMod header elememt reader = do
+  sign <- string header >> many (char '-')
   num <- many1 elememt
   case length sign of
-    0 -> return $ Number (fst $ head (reader num))
-    1 -> return $ Number (negate (fst $ head (reader num)))
+    0 -> return $ Number (reader num)
+    1 -> return $ Number (negate (reader num))
     _ -> undefined
 
 
@@ -414,7 +421,7 @@ parseRealNumber = do
 parseNumWithExponent :: Parser LispVal
 parseNumWithExponent = do
   n <- try parseRealNumber <|> parseDec
-  expnt <- many $ oneOf "Ee"
+  expnt <- many1 $ oneOf "Ee"
   case length expnt of
     0 -> return n
     1 -> do
@@ -460,10 +467,10 @@ parseNumWithExponent = do
 
 parseRationalNumber :: Parser LispVal
 parseRationalNumber = do
-  numerator <- parseDec
+  numerator_ <- parseDec
   _ <- char '/'
-  denominator <- parseDec
-  return $ Rational $ inner numerator denominator
+  denominator_ <- parseDec
+  return $ Rational $ inner numerator_ denominator_
     where inner (Number numer) (Number denom) = numer % denom
           inner _ _ = undefined
 
@@ -585,3 +592,148 @@ parseUnQuote = do
   _ <- char ','
   x <- parseExpr
   return $ List [Atom "unquote", x]
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+instance Show LispVal where
+  show = showVal
+
+showVal :: LispVal -> String
+showVal (List contents) = "(" ++ unwordsList contents ++ ")"
+showVal (DottedList head_ tail_) = "(" ++ unwordsList head_ ++ " . " ++ showVal tail_ ++ ")"
+showVal (Atom name) = name
+showVal (Number contents) = show contents
+showVal (Float contents) = show contents
+showVal (Rational contents) = show (numerator contents) ++ "/" ++ show (denominator contents)
+showVal (String contents) = "\"" ++ contents ++ "\""
+showVal (Bool True) = "#t"
+showVal (Bool False) = "#f"
+showVal (Character chr) = show chr
+
+unwordsList :: [LispVal] -> String
+unwordsList = unwords . map showVal
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+readExpr :: String -> String
+readExpr inp = case parse parseExpr "lisp" inp of
+  Left err -> "No match: " ++ show err
+  Right val -> "Found: " ++ show val
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+main :: IO ()
+main = do 
+  (expr:_) <- getArgs
+  putStrLn (readExpr expr)
