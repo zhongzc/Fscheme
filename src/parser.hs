@@ -204,11 +204,10 @@ parseBool = do
 #\newline	; the newline character 
 -}
 parseChar :: Parser LispVal
-parseChar = Character <$> (try parseCharWithName <|> parseHexChar <|> anyChar)
+parseChar = Character <$> (string "#\\" >> (try parseCharWithName <|> parseHexChar <|> anyChar))
 
 parseCharWithName :: Parser Char
 parseCharWithName = do
-  _ <- string "#\\"
   name <- many1 letter
   return $ case name of
     "space"     -> ' '
@@ -224,7 +223,6 @@ parseCharWithName = do
 
 parseHexChar :: Parser Char
 parseHexChar = do
-  _ <- string "#\\"
   x <- many1 hexDigit
   return $ DC.chr (fst $ head (readHex x))
 
