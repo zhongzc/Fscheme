@@ -58,7 +58,6 @@ parseExpr = try (lexeme parseNumWithExponent)
         <|> try (lexeme parseRationalNumber)
         <|> try (lexeme parseNumber)
         <|> try (lexeme parseBool)
-        <|> lexeme parseAtom
         <|> lexeme parseChar
         <|> lexeme parseString
         <|> try (lexeme (parens parseList))
@@ -66,41 +65,7 @@ parseExpr = try (lexeme parseNumWithExponent)
         <|> lexeme parseQuoted
         <|> lexeme parseQuasiQuoted
         <|> lexeme parseUnQuote
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+        <|> lexeme parseAtom
 
 
 
@@ -112,81 +77,16 @@ parseAtom = do
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 -- Parse Bool
 {- Bool literal
 #t  ==>  #t
 #f  ==>  #f
 '#f ==>  #f
 -}
-
 parseBool :: Parser LispVal
 parseBool = do
   _ <- char '#'
   (char 't' >> return (Bool True)) <|> (char 'f' >> return (Bool False))
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
@@ -219,38 +119,6 @@ parseChar = do
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 -- Parse String
 parseEscapedChar :: Parser Char
 parseEscapedChar = do
@@ -274,34 +142,6 @@ parseString = do
   x <- many $ noneOf "\\\"" <|> parseEscapedChar
   _ <- char '"'
   return $ String x
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
@@ -343,34 +183,6 @@ parseNumMod header elememt reader = do
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 parseRealNumber :: Parser LispVal
 parseRealNumber = do
   sign <- many (oneOf "+-")
@@ -384,36 +196,6 @@ parseRealNumber = do
          then Float $ negate $ fst $ head (readFloat dec)
          else Float $ fst $ head (readFloat dec)
     _ -> undefined
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
@@ -435,36 +217,6 @@ parseNumWithExponent = do
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 parseRationalNumber :: Parser LispVal
 parseRationalNumber = do
   numerator_ <- parseDec
@@ -473,35 +225,6 @@ parseRationalNumber = do
   return $ Rational $ inner numerator_ denominator_
     where inner (Number numer) (Number denom) = numer % denom
           inner _ _ = undefined
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
@@ -518,33 +241,6 @@ parseDottedList = do
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 parseQuoted :: Parser LispVal
 parseQuoted = do
   _ <- lexeme (char '\'')
@@ -553,38 +249,12 @@ parseQuoted = do
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 parseQuasiQuoted :: Parser LispVal
 parseQuasiQuoted = do
   _ <- char '`'
   x <- parseExpr
   return $ List [Atom "quasiquote", x]
+
 
 
 parseUnQuote :: Parser LispVal
