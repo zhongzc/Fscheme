@@ -406,6 +406,11 @@ eval v@(Rational _) = return v
 eval v@(Character _) = return v
 eval v@(Bool _) = return v
 eval (List [Atom "quote", v]) = return v
+eval (List [Atom "if", pred_, conseq, alt]) = do
+  result <- eval pred_
+  case result of
+    Bool False -> eval alt
+    _ -> eval conseq
 eval (List (Atom fn : args)) = traverse eval args >>= apply fn
 eval bad = throwError $ BadSpecialForm "Unrecongnized special form" bad
 
@@ -415,31 +420,96 @@ apply func args = maybe (throwError $ NotFunction "Unrecognized primitive functi
                         ($ args) $ lookup func primitives
 
 primitives :: [(String, [LispVal] -> ThrowsError LispVal)]
-primitives = [ ("+", numericBinop (+))
-             , ("-", numericBinop (-))
-             , ("*", numericBinop (*))
-             , ("/", numericBinop div)
-             , ("mod", numericBinop mod)
-             , ("quotient", numericBinop quot)
-             , ("remainder", numericBinop rem)]
+primitives = [ ("+",         numericBinop (+))
+             , ("-",         numericBinop (-))
+             , ("*",         numericBinop (*))
+             , ("/",         numericBinop div)
+             , ("mod",       numericBinop mod)
+             , ("quotient",  numericBinop quot)
+             , ("remainder", numericBinop rem)
+             , ("=",         numBoolBinop (==))
+             , ("<",         numBoolBinop (<))
+             , (">",         numBoolBinop (>))
+             , ("<=",        numBoolBinop (<=))
+             , (">=",        numBoolBinop (>=))
+             , ("/=",        numBoolBinop (/=))
+             , ("&&",        boolBoolBinop (&&))
+             , ("||",        boolBoolBinop (||))
+             , ("string=?",  strBoolBinop (==))
+             , ("string<?",  strBoolBinop (<))
+             , ("string>?",  strBoolBinop (>))
+             , ("string>=?", strBoolBinop (>=))
+             , ("string<=?", strBoolBinop (<=))
+             , ("car", car)
+             , ("cdr", cdr)
+             , ("cons", cons)
+             ]
+
+-- unpack ===> LispVal -> HaskellVal
+unpackNum :: LispVal -> ThrowsError Integer
+unpackNum (Number x) = return x
+unpackNum notNum = throwError $ TypeMismatch "number" notNum
+
+unpackStr :: LispVal -> ThrowsError String
+unpackStr (String s) = return s
+unpackStr notStr = throwError $ TypeMismatch "string" notStr
+
+unpackBool :: LispVal -> ThrowsError Bool
+unpackBool (Bool b) = return b
+unpackBool notBool = throwError $ TypeMismatch "boolean" notBool
 
 
+
+-- numeric binary operation
 numericBinop :: (Integer -> Integer -> Integer) -> [LispVal] -> ThrowsError LispVal
 numericBinop _ [] = throwError $ NumArgs 2 []
 numericBinop _ single@[_] = throwError $ NumArgs 2 single
 numericBinop op params = (Number . foldl1 op) <$> traverse unpackNum params
-  where unpackNum :: LispVal -> ThrowsError Integer
-        unpackNum (Number x) = return x
-        unpackNum notNum = throwError $ TypeMismatch "number" notNum
+
+
+
+-- bool binary operation
+boolBinop :: (LispVal -> ThrowsError a) -> (a -> a -> Bool) -> [LispVal] -> ThrowsError LispVal
+boolBinop unpacker op args = 
+  if length args /= 2
+  then throwError $ NumArgs 2 args
+  else do l <- unpacker $ head args
+          r <- unpacker $ args !! 1
+          return $ Bool $ l `op` r
+
+numBoolBinop :: (Integer -> Integer -> Bool) -> [LispVal] -> ThrowsError LispVal
+numBoolBinop = boolBinop unpackNum
+
+strBoolBinop :: (String -> String -> Bool) -> [LispVal] -> ThrowsError LispVal
+strBoolBinop = boolBinop unpackStr
+
+boolBoolBinop :: (Bool -> Bool -> Bool) -> [LispVal] -> ThrowsError LispVal
+boolBoolBinop = boolBinop unpackBool
 
 
 
 
 
 
+-- list primitives
+car :: [LispVal] -> ThrowsError LispVal
+car [List (x:_)] = return x
+car [DottedList (x:_) _] = return x
+car [badArg] = throwError $ TypeMismatch "pair" badArg
+car badArgList = throwError $ NumArgs 1 badArgList
 
+cdr :: [LispVal] -> ThrowsError LispVal
+cdr [List (_:xs)] = return $ List xs
+cdr [DottedList [_] x] = return x
+cdr [DottedList (_:xs) a] = return $ DottedList xs a
+cdr [badArg] = throwError $ TypeMismatch "pair" badArg
+cdr badArgList = throwError $ NumArgs 1 badArgList
 
-
+cons :: [LispVal] -> ThrowsError LispVal
+cons [x, List xs] = return $ List $ x:xs
+cons [x, DottedList xs xlast] = return $ DottedList (x : xs) xlast
+cons [x, y] = return $ DottedList [x] y
+cons badArgList = throwError $ NumArgs 2 badArgList
 
 
 
@@ -480,7 +550,7 @@ data LispError = NumArgs Integer [LispVal]
                | BadSpecialForm String LispVal
                | NotFunction String String
                | UnboundVar String String
-               | Default String
+              --  | Default String
 
 instance Show LispError where
   show (UnboundVar msg var)          = msg ++ ": " ++ var
